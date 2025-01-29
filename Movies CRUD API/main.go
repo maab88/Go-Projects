@@ -175,6 +175,104 @@ func deleteMovieHandler(db *pgx.Conn) gin.HandlerFunc {
 	}
 }
 
+func getDirectorHandler(db *pgx.Conn) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		rows, err := db.Query(context.Background(), `
+			SELECT id, first_name, last_name FROM directors
+		`)
+		if err != nil {
+			handleDBError(ctx, err)
+			return
+		}
+		defer rows.Close()
+
+		var directors []Director
+		for rows.Next() {
+			var director Director
+			if err := rows.Scan(&director.ID, &director.FirstName, &director.LastName); err != nil {
+				handleDBError(ctx, err)
+				return
+			}
+			directors = append(directors, director)
+		}
+		ctx.JSON(http.StatusOK, directors)
+	}
+}
+
+func getDirectorByIDHandler(db *pgx.Conn) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		id := ctx.Param("id")
+		var director Director
+
+		err := db.QueryRow(context.Background(), `
+			SELECT id, first_name, last_name FROM directors WHERE id = $1
+		`, id).Scan(&director.ID, &director.FirstName, &director.LastName)
+		if err != nil {
+			handleDBError(ctx, err)
+			return
+		}
+		ctx.JSON(http.StatusOK, director)
+	}
+}
+
+func createDirectorHandler(db *pgx.Conn) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var director Director
+
+		if err := ctx.ShouldBindJSON(&director); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+			return
+		}
+
+		err := db.QueryRow(context.Background(), `
+			INSERT INTO directors(first_name, last_name)
+			VALUES($1, $2)
+			RETURNING id
+		`, director.FirstName, director.LastName).Scan(&director.ID)
+		if err != nil {
+			handleDBError(ctx, err)
+			return
+		}
+		ctx.JSON(http.StatusCreated, director)
+	}
+}
+
+func updateDirectorHandler(db *pgx.Conn) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		id := ctx.Param("id")
+		var director Director
+		if err := ctx.ShouldBindJSON(&director); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+			return
+		}
+
+		_, err := db.Exec(context.Background(), `
+			UPDATE directors
+			SET first_name = $1, last_name = $2
+			WHERE id = $3
+		`, director.FirstName, director.LastName, id)
+		if err != nil {
+			handleDBError(ctx, err)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"message": "Director updated successfully"})
+	}
+}
+
+func deleteDirectorHandler(db *pgx.Conn) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		id := ctx.Param("id")
+		_, err := db.Exec(context.Background(), `
+			DELETE from directors WHERE id = $1
+		`, id)
+		if err != nil {
+			handleDBError(ctx, err)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"message": "Director deleted successfully"})
+	}
+}
+
 func main() {
 	connString := "postgres://postgres:test@localhost:5432/movies"
 	log.Println("Starting Server on port 8000")
@@ -192,6 +290,12 @@ func main() {
 	r.POST("/movies", createMovieHandler(db))
 	r.PUT("/movies/:id", updateMovieHandler(db))
 	r.DELETE("/movies/:id", deleteMovieHandler(db))
+
+	r.GET("/directors", getDirectorHandler(db))
+	r.GET("/directors/:id", getDirectorByIDHandler(db))
+	r.POST("/directors", createDirectorHandler(db))
+	r.PUT("/directors/:id", updateDirectorHandler(db))
+	r.DELETE("/directors/:id", deleteDirectorHandler(db))
 
 	r.Run(":8000")
 }
